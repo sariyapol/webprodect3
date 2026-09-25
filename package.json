@@ -1,0 +1,7 @@
+{
+  "name": "mut-shuttle-oracle",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {"start": "node server.js"},
+  "dependencies": {"express": "^5.1.0", "oracledb": "^6.9.0"}
+}
