@@ -10,8 +10,7 @@ oracledb.fetchAsString = [oracledb.CLOB];
 const cfg = {
   user: process.env.ORACLE_USER || 'LAB04HW',
   password: process.env.ORACLE_PASSWORD || '',
-  connectString:
-    process.env.ORACLE_CONNECT_STRING || 'localhost:1521/XEPDB1'
+  connectString: process.env.ORACLE_CONNECT_STRING || 'localhost:1521/XEPDB1'
 };
 
 const app = express();
@@ -21,7 +20,7 @@ app.use(express.static(path.join(__dirname, 'web')));
 
 
 // ======================================================
-// HELPER
+// HELPERS
 // ======================================================
 
 async function q(c, sql, binds = {}) {
@@ -29,57 +28,35 @@ async function q(c, sql, binds = {}) {
   return result.rows;
 }
 
-
-// ======================================================
-// MANY
-// ใช้ execute ทีละ row แทน executeMany
-// เพื่อเลี่ยงปัญหา NJS-012 / NJS-097 / NJS-098
-// ======================================================
-
 async function many(c, sql, rows) {
-
-  if (!rows || !rows.length) {
-    return;
-  }
+  if (!Array.isArray(rows) || rows.length === 0) return;
 
   for (const row of rows) {
-
     const cleaned = {};
 
     for (const [key, value] of Object.entries(row)) {
-
       if (value === undefined || value === '') {
         cleaned[key] = null;
-      }
-      else if (typeof value === 'boolean') {
+      } else if (typeof value === 'boolean') {
         cleaned[key] = value ? 1 : 0;
-      }
-      else {
+      } else {
         cleaned[key] = value;
       }
     }
 
-    await c.execute(
-      sql,
-      cleaned,
-      {
-        autoCommit: false
-      }
-    );
+    await c.execute(sql, cleaned, { autoCommit: false });
   }
 }
 
 
 // ======================================================
-// HEALTH CHECK
+// HEALTH
 // ======================================================
 
 app.get('/api/health', async (req, res) => {
-
   let c;
 
   try {
-
     c = await oracledb.getConnection(cfg);
 
     const r = await c.execute(`
@@ -94,8 +71,7 @@ app.get('/api/health', async (req, res) => {
       db: r.rows[0]
     });
 
-  }
-  catch (e) {
+  } catch (e) {
 
     console.error('HEALTH ERROR:', e);
 
@@ -104,22 +80,17 @@ app.get('/api/health', async (req, res) => {
       error: e.message
     });
 
-  }
-  finally {
-
-    if (c) {
-      await c.close();
-    }
+  } finally {
+    if (c) await c.close();
   }
 });
 
 
 // ======================================================
-// BOOTSTRAP - โหลดข้อมูลจาก ORACLE
+// BOOTSTRAP
 // ======================================================
 
 app.get('/api/bootstrap', async (req, res) => {
-
   let c;
 
   try {
@@ -143,146 +114,133 @@ app.get('/api/bootstrap', async (req, res) => {
       bookingItems
     ] = await Promise.all([
 
-      q(
-        c,
-        `SELECT
+      q(c, `
+        SELECT
           department_id ID,
           department_name NAME
-         FROM departments
-         ORDER BY department_id`
-      ),
+        FROM departments
+        ORDER BY department_id
+      `),
 
-      q(
-        c,
-        `SELECT
+      q(c, `
+        SELECT
           position_id ID,
           position_name NAME
-         FROM positions
-         ORDER BY position_id`
-      ),
+        FROM positions
+        ORDER BY position_id
+      `),
 
-      q(
-        c,
-        `SELECT
+      q(c, `
+        SELECT
           screen_id ID,
           screen_name NAME
-         FROM screens
-         ORDER BY screen_id`
-      ),
+        FROM screens
+        ORDER BY screen_id
+      `),
 
-      q(
-        c,
-        `SELECT
+      q(c, `
+        SELECT
           user_id ID,
           name NAME,
           email EMAIL,
           username USERNAME,
           password_hash PASSWORD,
           department_id DEPTID
-         FROM users
-         ORDER BY user_id`
-      ),
+        FROM users
+        ORDER BY user_id
+      `),
 
-      q(
-        c,
-        `SELECT
+      q(c, `
+        SELECT
           user_id ID,
           phone PHONE,
           position_id POSITIONID
-         FROM employees`
-      ),
+        FROM employees
+      `),
 
-      q(
-        c,
-        `SELECT
+      q(c, `
+        SELECT
           permission_id ID,
           position_id POSITIONID,
           screen_id SCREENID,
           can_add ADDX,
           can_edit EDITX,
           can_delete DELX
-         FROM permissions
-         ORDER BY permission_id`
-      ),
+        FROM permissions
+        ORDER BY permission_id
+      `),
 
-      q(
-        c,
-        `SELECT
+      q(c, `
+        SELECT
           vehicle_type_id ID,
           type_name NAME,
           description DETAIL,
           seat_count SEATS
-         FROM vehicle_types
-         ORDER BY vehicle_type_id`
-      ),
+        FROM vehicle_types
+        ORDER BY vehicle_type_id
+      `),
 
-      q(
-        c,
-        `SELECT
+      q(c, `
+        SELECT
           vehicle_id ID,
           plate_no PLATE,
           status STATUS,
           vehicle_type_id TYPEID
-         FROM vehicles
-         ORDER BY vehicle_id`
-      ),
+        FROM vehicles
+        ORDER BY vehicle_id
+      `),
 
-      q(
-        c,
-        `SELECT
+      q(c, `
+        SELECT
           stop_id ID,
           stop_name NAME
-         FROM stops
-         ORDER BY stop_id`
-      ),
+        FROM stops
+        ORDER BY stop_id
+      `),
 
-      q(
-        c,
-        `SELECT
+      q(c, `
+        SELECT
           route_id ID,
           route_name NAME
-         FROM routes
-         ORDER BY route_id`
-      ),
+        FROM routes
+        ORDER BY route_id
+      `),
 
-      q(
-        c,
-        `SELECT
+      q(c, `
+        SELECT
           route_id ROUTEID,
           stop_order SEQ,
           stop_id STOPID,
           travel_minutes MINUTES
-         FROM route_stops
-         ORDER BY route_id, stop_order`
-      ),
+        FROM route_stops
+        ORDER BY route_id, stop_order
+      `),
 
-      q(
-        c,
-        `SELECT
+      q(c, `
+        SELECT
           trip_id ID,
           TO_CHAR(trip_date,'YYYY-MM-DD') "DATE",
           TO_CHAR(depart_time,'HH24:MI') DEP,
           status STATUS,
+          seat_count SEATCOUNT,
           vehicle_id VEHICLEID,
           route_id ROUTEID,
           driver_id DRIVERID
-         FROM trips
-         ORDER BY trip_date, depart_time`
-      ),
+        FROM trips
+        ORDER BY trip_date, depart_time
+      `),
 
-      q(
-        c,
-        `SELECT
+      q(c, `
+        SELECT
           booking_id ID,
           TO_CHAR(booked_at,'YYYY-MM-DD HH24:MI') CREATED,
           user_id USERID
-         FROM bookings
-         ORDER BY booked_at`
-      ),
+        FROM bookings
+        ORDER BY booked_at
+      `),
 
-      q(
-        c,
-        `SELECT
+      q(c, `
+        SELECT
           booking_item_id ID,
           qr_code QR,
           status STATUS,
@@ -292,10 +250,9 @@ app.get('/api/bootstrap', async (req, res) => {
           trip_id TRIPID,
           board_stop_id BOARD,
           alight_stop_id ALIGHT
-         FROM booking_items
-         ORDER BY booking_item_id`
-      )
-
+        FROM booking_items
+        ORDER BY booking_item_id
+      `)
     ]);
 
 
@@ -305,7 +262,6 @@ app.get('/api/bootstrap', async (req, res) => {
 
 
     const jsUsers = users.map(x => ({
-
       id: x.ID,
       name: x.NAME,
       email: x.EMAIL,
@@ -327,7 +283,7 @@ app.get('/api/bootstrap', async (req, res) => {
 
     const db = {
 
-      version: 2,
+      version: 5,
 
       departments:
         departments.map(x => ({
@@ -401,6 +357,7 @@ app.get('/api/bootstrap', async (req, res) => {
           date: x.DATE,
           dep: x.DEP,
           status: x.STATUS,
+          seatCount: Number(x.SEATCOUNT || 0),
           vehicleId: x.VEHICLEID,
           routeId: x.ROUTEID,
           driverId: x.DRIVERID || ''
@@ -409,7 +366,7 @@ app.get('/api/bootstrap', async (req, res) => {
       bookings:
         bookings.map(x => ({
           id: x.ID,
-          created: x.CREATED,
+          createdAt: x.CREATED || '',
           userId: x.USERID
         })),
 
@@ -422,8 +379,8 @@ app.get('/api/bootstrap', async (req, res) => {
           checkin: x.CHECKIN || '',
           bookingId: x.BOOKINGID,
           tripId: x.TRIPID,
-          board: x.BOARD,
-          alight: x.ALIGHT
+          boardStopId: x.BOARD,
+          alightStopId: x.ALIGHT
         })),
 
       counters: {
@@ -439,8 +396,7 @@ app.get('/api/bootstrap', async (req, res) => {
       db
     });
 
-  }
-  catch (e) {
+  } catch (e) {
 
     console.error('BOOTSTRAP ERROR:', e);
 
@@ -449,71 +405,33 @@ app.get('/api/bootstrap', async (req, res) => {
       error: e.message
     });
 
-  }
-  finally {
+  } finally {
 
-    if (c) {
-      await c.close();
-    }
+    if (c) await c.close();
   }
 });
 
 
 // ======================================================
-// DELETE OLD DATA
-// ======================================================
-
-async function delAll(c) {
-
-  const tables = [
-    'booking_items',
-    'bookings',
-    'trips',
-    'route_stops',
-    'permissions',
-    'employees',
-    'users',
-    'vehicles',
-    'vehicle_types',
-    'routes',
-    'stops',
-    'screens',
-    'positions',
-    'departments'
-  ];
-
-  for (const table of tables) {
-    await c.execute(`DELETE FROM ${table}`);
-  }
-}
-
-
-// ======================================================
-// SYNC DATABASE
+// SAFE SYNC
 // ======================================================
 
 app.post('/api/sync', async (req, res) => {
 
-  const d =
-    req.body &&
-    req.body.db;
+  const d = req.body && req.body.db;
 
   if (!d) {
-
     return res.status(400).json({
       ok: false,
       error: 'missing db'
     });
   }
 
-
   let c;
 
   try {
 
     c = await oracledb.getConnection(cfg);
-
-    await delAll(c);
 
 
     // ==================================================
@@ -522,15 +440,37 @@ app.post('/api/sync', async (req, res) => {
 
     await many(
       c,
-      `INSERT INTO departments(
-        department_id,
-        department_name
+      `
+      MERGE INTO departments t
+      USING (
+        SELECT
+          :id AS department_id,
+          :name AS department_name
+        FROM dual
+      ) s
+
+      ON (
+        t.department_id = s.department_id
       )
-      VALUES(
-        :id,
-        :name
-      )`,
-      d.departments
+
+      WHEN MATCHED THEN
+        UPDATE SET
+          t.department_name = s.department_name
+
+      WHEN NOT MATCHED THEN
+        INSERT (
+          department_id,
+          department_name
+        )
+        VALUES (
+          s.department_id,
+          s.department_name
+        )
+      `,
+      (d.departments || []).map(x => ({
+        id: x.id,
+        name: x.name
+      }))
     );
 
 
@@ -540,15 +480,37 @@ app.post('/api/sync', async (req, res) => {
 
     await many(
       c,
-      `INSERT INTO positions(
-        position_id,
-        position_name
+      `
+      MERGE INTO positions t
+      USING (
+        SELECT
+          :id AS position_id,
+          :name AS position_name
+        FROM dual
+      ) s
+
+      ON (
+        t.position_id = s.position_id
       )
-      VALUES(
-        :id,
-        :name
-      )`,
-      d.positions
+
+      WHEN MATCHED THEN
+        UPDATE SET
+          t.position_name = s.position_name
+
+      WHEN NOT MATCHED THEN
+        INSERT (
+          position_id,
+          position_name
+        )
+        VALUES (
+          s.position_id,
+          s.position_name
+        )
+      `,
+      (d.positions || []).map(x => ({
+        id: x.id,
+        name: x.name
+      }))
     );
 
 
@@ -558,15 +520,37 @@ app.post('/api/sync', async (req, res) => {
 
     await many(
       c,
-      `INSERT INTO screens(
-        screen_id,
-        screen_name
+      `
+      MERGE INTO screens t
+      USING (
+        SELECT
+          :id AS screen_id,
+          :name AS screen_name
+        FROM dual
+      ) s
+
+      ON (
+        t.screen_id = s.screen_id
       )
-      VALUES(
-        :id,
-        :name
-      )`,
-      d.screens
+
+      WHEN MATCHED THEN
+        UPDATE SET
+          t.screen_name = s.screen_name
+
+      WHEN NOT MATCHED THEN
+        INSERT (
+          screen_id,
+          screen_name
+        )
+        VALUES (
+          s.screen_id,
+          s.screen_name
+        )
+      `,
+      (d.screens || []).map(x => ({
+        id: x.id,
+        name: x.name
+      }))
     );
 
 
@@ -576,24 +560,50 @@ app.post('/api/sync', async (req, res) => {
 
     await many(
       c,
-      `INSERT INTO users(
-        user_id,
-        name,
-        email,
-        username,
-        password_hash,
-        department_id
-      )
-      VALUES(
-        :id,
-        :name,
-        :email,
-        :username,
-        :password,
-        :deptId
-      )`,
+      `
+      MERGE INTO users t
+      USING (
+        SELECT
+          :id AS user_id,
+          :name AS name,
+          :email AS email,
+          :username AS username,
+          :password AS password_hash,
+          :deptId AS department_id
+        FROM dual
+      ) s
 
-      d.users.map(x => ({
+      ON (
+        t.user_id = s.user_id
+      )
+
+      WHEN MATCHED THEN
+        UPDATE SET
+          t.name = s.name,
+          t.email = s.email,
+          t.username = s.username,
+          t.password_hash = s.password_hash,
+          t.department_id = s.department_id
+
+      WHEN NOT MATCHED THEN
+        INSERT (
+          user_id,
+          name,
+          email,
+          username,
+          password_hash,
+          department_id
+        )
+        VALUES (
+          s.user_id,
+          s.name,
+          s.email,
+          s.username,
+          s.password_hash,
+          s.department_id
+        )
+      `,
+      (d.users || []).map(x => ({
         id: x.id,
         name: x.name,
         email: x.email,
@@ -610,18 +620,38 @@ app.post('/api/sync', async (req, res) => {
 
     await many(
       c,
-      `INSERT INTO employees(
-        user_id,
-        phone,
-        position_id
-      )
-      VALUES(
-        :id,
-        :phone,
-        :positionId
-      )`,
+      `
+      MERGE INTO employees t
+      USING (
+        SELECT
+          :id AS user_id,
+          :phone AS phone,
+          :positionId AS position_id
+        FROM dual
+      ) s
 
-      d.users
+      ON (
+        t.user_id = s.user_id
+      )
+
+      WHEN MATCHED THEN
+        UPDATE SET
+          t.phone = s.phone,
+          t.position_id = s.position_id
+
+      WHEN NOT MATCHED THEN
+        INSERT (
+          user_id,
+          phone,
+          position_id
+        )
+        VALUES (
+          s.user_id,
+          s.phone,
+          s.position_id
+        )
+      `,
+      (d.users || [])
         .filter(x => x.employee)
         .map(x => ({
           id: x.id,
@@ -637,24 +667,50 @@ app.post('/api/sync', async (req, res) => {
 
     await many(
       c,
-      `INSERT INTO permissions(
-        permission_id,
-        can_add,
-        can_edit,
-        can_delete,
-        position_id,
-        screen_id
-      )
-      VALUES(
-        :id,
-        :canAdd,
-        :canEdit,
-        :canDelete,
-        :positionId,
-        :screenId
-      )`,
+      `
+      MERGE INTO permissions t
+      USING (
+        SELECT
+          :id AS permission_id,
+          :canAdd AS can_add,
+          :canEdit AS can_edit,
+          :canDelete AS can_delete,
+          :positionId AS position_id,
+          :screenId AS screen_id
+        FROM dual
+      ) s
 
-      d.permissions.map(x => ({
+      ON (
+        t.permission_id = s.permission_id
+      )
+
+      WHEN MATCHED THEN
+        UPDATE SET
+          t.can_add = s.can_add,
+          t.can_edit = s.can_edit,
+          t.can_delete = s.can_delete,
+          t.position_id = s.position_id,
+          t.screen_id = s.screen_id
+
+      WHEN NOT MATCHED THEN
+        INSERT (
+          permission_id,
+          can_add,
+          can_edit,
+          can_delete,
+          position_id,
+          screen_id
+        )
+        VALUES (
+          s.permission_id,
+          s.can_add,
+          s.can_edit,
+          s.can_delete,
+          s.position_id,
+          s.screen_id
+        )
+      `,
+      (d.permissions || []).map(x => ({
         id: x.id,
         canAdd: Number(x.add || 0),
         canEdit: Number(x.edit || 0),
@@ -671,20 +727,42 @@ app.post('/api/sync', async (req, res) => {
 
     await many(
       c,
-      `INSERT INTO vehicle_types(
-        vehicle_type_id,
-        type_name,
-        description,
-        seat_count
-      )
-      VALUES(
-        :id,
-        :name,
-        :detail,
-        :seats
-      )`,
+      `
+      MERGE INTO vehicle_types t
+      USING (
+        SELECT
+          :id AS vehicle_type_id,
+          :name AS type_name,
+          :detail AS description,
+          :seats AS seat_count
+        FROM dual
+      ) s
 
-      d.vehicleTypes.map(x => ({
+      ON (
+        t.vehicle_type_id = s.vehicle_type_id
+      )
+
+      WHEN MATCHED THEN
+        UPDATE SET
+          t.type_name = s.type_name,
+          t.description = s.description,
+          t.seat_count = s.seat_count
+
+      WHEN NOT MATCHED THEN
+        INSERT (
+          vehicle_type_id,
+          type_name,
+          description,
+          seat_count
+        )
+        VALUES (
+          s.vehicle_type_id,
+          s.type_name,
+          s.description,
+          s.seat_count
+        )
+      `,
+      (d.vehicleTypes || []).map(x => ({
         id: x.id,
         name: x.name,
         detail: x.detail || null,
@@ -699,20 +777,42 @@ app.post('/api/sync', async (req, res) => {
 
     await many(
       c,
-      `INSERT INTO vehicles(
-        vehicle_id,
-        plate_no,
-        status,
-        vehicle_type_id
-      )
-      VALUES(
-        :id,
-        :plate,
-        :status,
-        :typeId
-      )`,
+      `
+      MERGE INTO vehicles t
+      USING (
+        SELECT
+          :id AS vehicle_id,
+          :plate AS plate_no,
+          :status AS status,
+          :typeId AS vehicle_type_id
+        FROM dual
+      ) s
 
-      d.vehicles.map(x => ({
+      ON (
+        t.vehicle_id = s.vehicle_id
+      )
+
+      WHEN MATCHED THEN
+        UPDATE SET
+          t.plate_no = s.plate_no,
+          t.status = s.status,
+          t.vehicle_type_id = s.vehicle_type_id
+
+      WHEN NOT MATCHED THEN
+        INSERT (
+          vehicle_id,
+          plate_no,
+          status,
+          vehicle_type_id
+        )
+        VALUES (
+          s.vehicle_id,
+          s.plate_no,
+          s.status,
+          s.vehicle_type_id
+        )
+      `,
+      (d.vehicles || []).map(x => ({
         id: x.id,
         plate: x.plate,
         status: x.status,
@@ -727,16 +827,34 @@ app.post('/api/sync', async (req, res) => {
 
     await many(
       c,
-      `INSERT INTO stops(
-        stop_id,
-        stop_name
-      )
-      VALUES(
-        :id,
-        :name
-      )`,
+      `
+      MERGE INTO stops t
+      USING (
+        SELECT
+          :id AS stop_id,
+          :name AS stop_name
+        FROM dual
+      ) s
 
-      d.stops.map(x => ({
+      ON (
+        t.stop_id = s.stop_id
+      )
+
+      WHEN MATCHED THEN
+        UPDATE SET
+          t.stop_name = s.stop_name
+
+      WHEN NOT MATCHED THEN
+        INSERT (
+          stop_id,
+          stop_name
+        )
+        VALUES (
+          s.stop_id,
+          s.stop_name
+        )
+      `,
+      (d.stops || []).map(x => ({
         id: x.id,
         name: x.name
       }))
@@ -749,16 +867,34 @@ app.post('/api/sync', async (req, res) => {
 
     await many(
       c,
-      `INSERT INTO routes(
-        route_id,
-        route_name
-      )
-      VALUES(
-        :id,
-        :name
-      )`,
+      `
+      MERGE INTO routes t
+      USING (
+        SELECT
+          :id AS route_id,
+          :name AS route_name
+        FROM dual
+      ) s
 
-      d.routes.map(x => ({
+      ON (
+        t.route_id = s.route_id
+      )
+
+      WHEN MATCHED THEN
+        UPDATE SET
+          t.route_name = s.route_name
+
+      WHEN NOT MATCHED THEN
+        INSERT (
+          route_id,
+          route_name
+        )
+        VALUES (
+          s.route_id,
+          s.route_name
+        )
+      `,
+      (d.routes || []).map(x => ({
         id: x.id,
         name: x.name
       }))
@@ -771,20 +907,42 @@ app.post('/api/sync', async (req, res) => {
 
     await many(
       c,
-      `INSERT INTO route_stops(
-        route_id,
-        stop_order,
-        stop_id,
-        travel_minutes
-      )
-      VALUES(
-        :routeId,
-        :seq,
-        :stopId,
-        :minutes
-      )`,
+      `
+      MERGE INTO route_stops t
+      USING (
+        SELECT
+          :routeId AS route_id,
+          :seq AS stop_order,
+          :stopId AS stop_id,
+          :minutes AS travel_minutes
+        FROM dual
+      ) s
 
-      d.routeStops.map(x => ({
+      ON (
+        t.route_id = s.route_id
+        AND t.stop_order = s.stop_order
+      )
+
+      WHEN MATCHED THEN
+        UPDATE SET
+          t.stop_id = s.stop_id,
+          t.travel_minutes = s.travel_minutes
+
+      WHEN NOT MATCHED THEN
+        INSERT (
+          route_id,
+          stop_order,
+          stop_id,
+          travel_minutes
+        )
+        VALUES (
+          s.route_id,
+          s.stop_order,
+          s.stop_id,
+          s.travel_minutes
+        )
+      `,
+      (d.routeStops || []).map(x => ({
         routeId: x.routeId,
         seq: Number(x.seq || 0),
         stopId: x.stopId,
@@ -797,62 +955,107 @@ app.post('/api/sync', async (req, res) => {
     // TRIPS
     // ==================================================
 
-    const tripRows =
-      d.trips.map(x => ({
+    const tripRows = (d.trips || []).map(x => {
+
+      let seatCount = Number(x.seatCount || 0);
+
+      if (seatCount <= 0) {
+
+        const vehicle =
+          (d.vehicles || []).find(
+            v => v.id === x.vehicleId
+          );
+
+        const vehicleType =
+          vehicle
+            ? (d.vehicleTypes || []).find(
+                vt => vt.id === vehicle.typeId
+              )
+            : null;
+
+        seatCount =
+          vehicleType
+            ? Number(vehicleType.seats || 0)
+            : 0;
+      }
+
+      return {
         id: x.id,
         datex: x.date,
         dep: x.dep,
         status: x.status,
+        seatCount,
         vehicleId: x.vehicleId,
         routeId: x.routeId,
         driverId: x.driverId || null
-      }));
+      };
+    });
 
 
     await many(
       c,
+      `
+      MERGE INTO trips t
 
-      `INSERT INTO trips(
-        trip_id,
-        trip_date,
-        depart_time,
-        status,
-        seat_count,
-        vehicle_id,
-        route_id,
-        driver_id
+      USING (
+        SELECT
+          :id AS trip_id,
+
+          TO_DATE(
+            :datex,
+            'YYYY-MM-DD'
+          ) AS trip_date,
+
+          TO_TIMESTAMP(
+            '2000-01-01 ' || :dep,
+            'YYYY-MM-DD HH24:MI'
+          ) AS depart_time,
+
+          :status AS status,
+          :seatCount AS seat_count,
+          :vehicleId AS vehicle_id,
+          :routeId AS route_id,
+          :driverId AS driver_id
+
+        FROM dual
+      ) s
+
+      ON (
+        t.trip_id = s.trip_id
       )
 
-      SELECT
-        :id,
+      WHEN MATCHED THEN
+        UPDATE SET
+          t.trip_date = s.trip_date,
+          t.depart_time = s.depart_time,
+          t.status = s.status,
+          t.seat_count = s.seat_count,
+          t.vehicle_id = s.vehicle_id,
+          t.route_id = s.route_id,
+          t.driver_id = s.driver_id
 
-        TO_DATE(
-          :datex,
-          'YYYY-MM-DD'
-        ),
-
-        TO_TIMESTAMP(
-          '2000-01-01 ' || :dep,
-          'YYYY-MM-DD HH24:MI'
-        ),
-
-        :status,
-
-        vt.seat_count,
-
-        :vehicleId,
-        :routeId,
-        :driverId
-
-      FROM vehicles v
-
-      JOIN vehicle_types vt
-        ON vt.vehicle_type_id =
-           v.vehicle_type_id
-
-      WHERE
-        v.vehicle_id = :vehicleId`,
-
+      WHEN NOT MATCHED THEN
+        INSERT (
+          trip_id,
+          trip_date,
+          depart_time,
+          status,
+          seat_count,
+          vehicle_id,
+          route_id,
+          driver_id
+        )
+        VALUES (
+          s.trip_id,
+          s.trip_date,
+          s.depart_time,
+          s.status,
+          s.seat_count,
+          s.vehicle_id,
+          s.route_id,
+          s.driver_id
+        )
+      `,
       tripRows
     );
 
@@ -861,31 +1064,61 @@ app.post('/api/sync', async (req, res) => {
     // BOOKINGS
     // ==================================================
 
+    const bookingRows =
+      (d.bookings || []).map(x => ({
+        id: x.id,
+
+        createdAt:
+          x.createdAt ||
+          x.created ||
+          null,
+
+        userId:
+          x.userId
+      }));
+
+
     await many(
       c,
+      `
+      MERGE INTO bookings t
 
-      `INSERT INTO bookings(
-        booking_id,
-        booked_at,
-        user_id
+      USING (
+        SELECT
+          :id AS booking_id,
+
+          TO_TIMESTAMP(
+            :createdAt,
+            'YYYY-MM-DD HH24:MI'
+          ) AS booked_at,
+
+          :userId AS user_id
+
+        FROM dual
+      ) s
+
+      ON (
+        t.booking_id = s.booking_id
       )
 
-      VALUES(
-        :id,
+      WHEN MATCHED THEN
+        UPDATE SET
+          t.booked_at = s.booked_at,
+          t.user_id = s.user_id
 
-        TO_TIMESTAMP(
-          :created,
-          'YYYY-MM-DD HH24:MI'
-        ),
-
-        :userId
-      )`,
-
-      d.bookings.map(x => ({
-        id: x.id,
-        created: x.created,
-        userId: x.userId
-      }))
+      WHEN NOT MATCHED THEN
+        INSERT (
+          booking_id,
+          booked_at,
+          user_id
+        )
+        VALUES (
+          s.booking_id,
+          s.booked_at,
+          s.user_id
+        )
+      `,
+      bookingRows
     );
 
 
@@ -894,87 +1127,124 @@ app.post('/api/sync', async (req, res) => {
     // ==================================================
 
     const bookingItemRows =
-      d.bookingItems.map(x => ({
+      (d.bookingItems || []).map(x => ({
         id: x.id,
         qr: x.qr,
         status: x.status,
         seats: Number(x.seats || 1),
-
-        checkin:
-          x.checkin
-            ? x.checkin
-            : null,
-
+        checkin: x.checkin || null,
         bookingId: x.bookingId,
         tripId: x.tripId,
-        board: x.board,
-        alight: x.alight
+
+        boardStopId:
+          x.boardStopId ||
+          x.board ||
+          null,
+
+        alightStopId:
+          x.alightStopId ||
+          x.alight ||
+          null
       }));
 
 
     await many(
       c,
+      `
+      MERGE INTO booking_items t
 
-      `INSERT INTO booking_items(
-        booking_item_id,
-        qr_code,
-        status,
-        seats,
-        checkin_at,
-        booking_id,
-        trip_id,
-        board_stop_id,
-        alight_stop_id
-      )
+      USING (
+        SELECT
+          :id AS booking_item_id,
+          :qr AS qr_code,
+          :status AS status,
+          :seats AS seats,
 
-      VALUES(
-        :id,
-        :qr,
-        :status,
-        :seats,
-
-        CASE
-          WHEN :checkin IS NULL
-          THEN NULL
-          ELSE TO_TIMESTAMP(
+          TO_TIMESTAMP(
             :checkin,
             'YYYY-MM-DD HH24:MI'
-          )
-        END,
+          ) AS checkin_at,
 
-        :bookingId,
-        :tripId,
-        :board,
-        :alight
-      )`,
+          :bookingId AS booking_id,
+          :tripId AS trip_id,
+          :boardStopId AS board_stop_id,
+          :alightStopId AS alight_stop_id
 
+        FROM dual
+      ) s
+
+      ON (
+        t.booking_item_id =
+          s.booking_item_id
+      )
+
+      WHEN MATCHED THEN
+        UPDATE SET
+          t.qr_code = s.qr_code,
+          t.status = s.status,
+          t.seats = s.seats,
+          t.checkin_at = s.checkin_at,
+          t.booking_id = s.booking_id,
+          t.trip_id = s.trip_id,
+          t.board_stop_id = s.board_stop_id,
+          t.alight_stop_id = s.alight_stop_id
+
+      WHEN NOT MATCHED THEN
+        INSERT (
+          booking_item_id,
+          qr_code,
+          status,
+          seats,
+          checkin_at,
+          booking_id,
+          trip_id,
+          board_stop_id,
+          alight_stop_id
+        )
+        VALUES (
+          s.booking_item_id,
+          s.qr_code,
+          s.status,
+          s.seats,
+          s.checkin_at,
+          s.booking_id,
+          s.trip_id,
+          s.board_stop_id,
+          s.alight_stop_id
+        )
+      `,
       bookingItemRows
     );
 
 
-    // ==================================================
-    // COMMIT
-    // ==================================================
-
     await c.commit();
 
-    console.log('SYNC SUCCESS');
+    console.log('');
+    console.log('====================================');
+    console.log(' SAFE SYNC SUCCESS');
+    console.log(' No tables were deleted');
+    console.log('====================================');
+    console.log('');
 
     res.json({
-      ok: true
+      ok: true,
+      mode: 'safe-upsert'
     });
 
-  }
-  catch (e) {
+  } catch (e) {
 
-    console.error('SYNC ERROR:', e);
+    console.error('');
+    console.error('====================================');
+    console.error('SYNC ERROR');
+    console.error('====================================');
+    console.error(e);
+    console.error('');
 
     if (c) {
-
       try {
         await c.rollback();
-      }
-      catch (rollbackError) {
+        console.log('ROLLBACK SUCCESS');
+      } catch (rollbackError) {
         console.error(
           'ROLLBACK ERROR:',
           rollbackError
@@ -988,11 +1258,291 @@ app.post('/api/sync', async (req, res) => {
       code: e.code || null
     });
 
+  } finally {
+
+    if (c) await c.close();
   }
-  finally {
+});
+
+
+// ======================================================
+// SAFE DELETE BY ID
+//
+// ลบเฉพาะ record ที่ผู้ใช้กดลบ
+// ไม่มี DELETE FROM table ทั้งตาราง
+// ======================================================
+
+app.delete('/api/delete/:entity/:id', async (req, res) => {
+
+  const entity =
+    String(req.params.entity || '');
+
+  const id =
+    String(req.params.id || '').trim();
+
+
+  if (!id) {
+
+    return res.status(400).json({
+      ok: false,
+      error: 'missing id'
+    });
+  }
+
+
+  // ====================================================
+  // WHITELIST
+  // ====================================================
+
+  const allowed = {
+
+    departments: {
+      sql:
+        `DELETE FROM departments
+         WHERE department_id = :id`
+    },
+
+
+    positions: {
+
+      before: [
+        `DELETE FROM permissions
+         WHERE position_id = :id`
+      ],
+
+      sql:
+        `DELETE FROM positions
+         WHERE position_id = :id`
+    },
+
+
+    screens: {
+
+      before: [
+        `DELETE FROM permissions
+         WHERE screen_id = :id`
+      ],
+
+      sql:
+        `DELETE FROM screens
+         WHERE screen_id = :id`
+    },
+
+
+    vehicleTypes: {
+
+      sql:
+        `DELETE FROM vehicle_types
+         WHERE vehicle_type_id = :id`
+    },
+
+
+    vehicles: {
+
+      sql:
+        `DELETE FROM vehicles
+         WHERE vehicle_id = :id`
+    },
+
+
+    stops: {
+
+      sql:
+        `DELETE FROM stops
+         WHERE stop_id = :id`
+    },
+
+
+    routes: {
+
+      before: [
+        `DELETE FROM route_stops
+         WHERE route_id = :id`
+      ],
+
+      sql:
+        `DELETE FROM routes
+         WHERE route_id = :id`
+    },
+
+
+    trips: {
+
+      sql:
+        `DELETE FROM trips
+         WHERE trip_id = :id`
+    },
+
+
+    users: {
+
+      before: [
+        `DELETE FROM employees
+         WHERE user_id = :id`
+      ],
+
+      sql:
+        `DELETE FROM users
+         WHERE user_id = :id`
+    }
+  };
+
+
+  const deleteConfig =
+    allowed[entity];
+
+
+  if (!deleteConfig) {
+
+    return res.status(400).json({
+      ok: false,
+      error:
+        'ไม่อนุญาตให้ลบ entity นี้: ' +
+        entity
+    });
+  }
+
+
+  let c;
+
+
+  try {
+
+    c =
+      await oracledb.getConnection(cfg);
+
+
+    // ==================================================
+    // DELETE CHILD RECORDS
+    // ==================================================
+
+    for (
+      const sql
+      of (deleteConfig.before || [])
+    ) {
+
+      await c.execute(
+        sql,
+        { id },
+        {
+          autoCommit: false
+        }
+      );
+    }
+
+
+    // ==================================================
+    // DELETE MAIN RECORD
+    // ==================================================
+
+    const result =
+      await c.execute(
+        deleteConfig.sql,
+        { id },
+        {
+          autoCommit: false
+        }
+      );
+
+
+    // ==================================================
+    // NOT FOUND
+    // ==================================================
+
+    if (!result.rowsAffected) {
+
+      await c.rollback();
+
+      return res.status(404).json({
+        ok: false,
+        error:
+          'ไม่พบข้อมูล ' + id
+      });
+    }
+
+
+    // ==================================================
+    // COMMIT
+    // ==================================================
+
+    await c.commit();
+
+
+    console.log('');
+    console.log(
+      'SAFE DELETE SUCCESS:',
+      entity,
+      id
+    );
+    console.log('');
+
+
+    res.json({
+      ok: true,
+      entity,
+      id
+    });
+
+
+  } catch (e) {
+
+
+    // ==================================================
+    // ROLLBACK
+    // ==================================================
 
     if (c) {
-      await c.close();
+
+      try {
+        await c.rollback();
+      } catch (_) {}
+    }
+
+
+    console.error('');
+    console.error(
+      'SAFE DELETE ERROR:',
+      entity,
+      id
+    );
+    console.error(e);
+    console.error('');
+
+
+    let message =
+      e.message ||
+      'ไม่สามารถลบข้อมูลได้';
+
+
+    // ==================================================
+    // FOREIGN KEY
+    // ==================================================
+
+    if (
+      e.errorNum === 2292 ||
+      String(e.message || '')
+        .includes('ORA-02292')
+    ) {
+
+      message =
+        'ไม่สามารถลบได้ เพราะข้อมูลนี้ถูกใช้งานโดยข้อมูลอื่นอยู่';
+    }
+
+
+    res.status(409).json({
+      ok: false,
+      error: message,
+      code: e.code || null
+    });
+
+
+  } finally {
+
+    if (c) {
+
+      try {
+        await c.close();
+      } catch (_) {}
     }
   }
 });
@@ -1029,8 +1579,17 @@ app.listen(
     console.log('');
     console.log('====================================');
     console.log(' MUT Shuttle Server');
+    console.log(' SAFE SYNC + SAFE DELETE');
     console.log('====================================');
-    console.log(` http://localhost:${port}`);
+
+    console.log(
+      ` Open    : http://localhost:${port}`
+    );
+
+    console.log(
+      ` Test DB : http://localhost:${port}/api/health`
+    );
+
     console.log('====================================');
     console.log('');
   }
