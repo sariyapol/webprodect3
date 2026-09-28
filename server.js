@@ -50,6 +50,433 @@ async function many(c, sql, rows) {
 
 
 // ======================================================
+// AUTO FUTURE TRIPS
+// สร้างรอบรถอัตโนมัติล่วงหน้า 30 วัน
+// สลับ 2 รอบ / 3 รอบ
+// ไม่ลบรอบเดิม
+// ======================================================
+
+async function ensureFutureTrips(c, daysAhead = 30) {
+
+  const routes = await q(
+    c,
+    `
+    SELECT route_id ID
+    FROM routes
+    ORDER BY route_id
+    `
+  );
+
+  if (!routes.length) {
+    console.log('AUTO TRIPS: NO ROUTES');
+    return;
+  }
+
+  const routeId =
+    routes.some(r => r.ID === 'R001')
+      ? 'R001'
+      : routes[0].ID;
+
+
+  const vehicles = await q(
+    c,
+    `
+    SELECT
+      v.vehicle_id ID,
+      vt.seat_count SEATS
+    FROM vehicles v
+    JOIN vehicle_types vt
+      ON vt.vehicle_type_id = v.vehicle_type_id
+    ORDER BY v.vehicle_id
+    `
+  );
+
+  if (!vehicles.length) {
+    console.log('AUTO TRIPS: NO VEHICLES');
+    return;
+  }
+
+
+  const employees = await q(
+    c,
+    `
+    SELECT user_id ID
+    FROM employees
+    ORDER BY user_id
+    `
+  );
+
+
+  const preferredVehicles =
+    ['V001', 'V002', 'V003']
+      .map(id =>
+        vehicles.find(v => v.ID === id)
+      )
+      .filter(Boolean);
+
+
+  const usableVehicles =
+    preferredVehicles.length
+      ? preferredVehicles
+      : vehicles;
+
+
+  const preferredDrivers =
+    ['U003', 'U004', 'U005']
+      .filter(id =>
+        employees.some(e => e.ID === id)
+      );
+
+
+  const usableDrivers =
+    preferredDrivers.length
+      ? preferredDrivers
+      : employees.map(e => e.ID);
+
+
+  const maxResult = await c.execute(`
+    SELECT
+      NVL(
+        MAX(
+          TO_NUMBER(
+            REGEXP_SUBSTR(
+              trip_id,
+              '[0-9]+'
+            )
+          )
+        ),
+        0
+      ) MAXNO
+    FROM trips
+    WHERE REGEXP_LIKE(
+      trip_id,
+      '^TR[0-9]+$'
+    )
+  `);
+
+
+  let nextNo =
+    Number(
+      maxResult.rows[0].MAXNO || 0
+    ) + 1;
+
+
+  /*
+   * วันที่ฐาน
+   *
+   * 2026-09-28 = 2 รอบ
+   * 2026-09-29 = 3 รอบ
+   * 2026-09-30 = 2 รอบ
+   * 2026-10-01 = 3 รอบ
+   *
+   * แล้วสลับแบบนี้ต่อไป
+   */
+
+  const base =
+    new Date(
+      2026,
+      8,
+      28
+    );
+
+  base.setHours(
+    0,
+    0,
+    0,
+    0
+  );
+
+
+  const today =
+    new Date();
+
+  today.setHours(
+    0,
+    0,
+    0,
+    0
+  );
+
+
+  for (
+    let offset = 0;
+    offset <= daysAhead;
+    offset++
+  ) {
+
+    const d =
+      new Date(today);
+
+    d.setDate(
+      today.getDate() + offset
+    );
+
+
+    const yyyy =
+      d.getFullYear();
+
+    const mm =
+      String(
+        d.getMonth() + 1
+      ).padStart(2, '0');
+
+    const dd =
+      String(
+        d.getDate()
+      ).padStart(2, '0');
+
+
+    const dateText =
+      `${yyyy}-${mm}-${dd}`;
+
+
+    const diffDays =
+      Math.round(
+        (
+          d.getTime() -
+          base.getTime()
+        ) /
+        86400000
+      );
+
+
+    const twoRounds =
+      Math.abs(diffDays) % 2 === 0;
+
+
+    /*
+     * วัน 2 รอบ
+     *
+     * 09:30
+     * 13:30
+     *
+     * วัน 3 รอบ
+     *
+     * 08:30
+     * 12:00
+     * 16:00
+     */
+
+    const slots =
+      twoRounds
+        ? [
+            {
+              time: '09:30',
+              vehicle: 1,
+              driver: 0
+            },
+            {
+              time: '13:30',
+              vehicle: 2,
+              driver: 2
+            }
+          ]
+        : [
+            {
+              time: '08:30',
+              vehicle: 0,
+              driver: 1
+            },
+            {
+              time: '12:00',
+              vehicle: 1,
+              driver: 0
+            },
+            {
+              time: '16:00',
+              vehicle: 2,
+              driver: 2
+            }
+          ];
+
+
+    const existing =
+      await q(
+        c,
+        `
+        SELECT
+          TO_CHAR(
+            depart_time,
+            'HH24:MI'
+          ) DEP
+        FROM trips
+        WHERE TRUNC(trip_date) =
+          TO_DATE(
+            :datex,
+            'YYYY-MM-DD'
+          )
+        ORDER BY depart_time
+        `,
+        {
+          datex: dateText
+        }
+      );
+
+
+    /*
+     * ถ้ามีจำนวนรอบครบแล้ว
+     * ไม่ต้องสร้างอะไรเพิ่ม
+     */
+
+    if (
+      existing.length >=
+      slots.length
+    ) {
+      continue;
+    }
+
+
+    const existingTimes =
+      new Set(
+        existing.map(
+          x => x.DEP
+        )
+      );
+
+
+    let currentCount =
+      existing.length;
+
+
+    for (
+      let i = 0;
+      i < slots.length &&
+      currentCount < slots.length;
+      i++
+    ) {
+
+      const slot =
+        slots[i];
+
+
+      /*
+       * ถ้าเวลานี้มีอยู่แล้ว
+       * ไม่สร้างซ้ำ
+       */
+
+      if (
+        existingTimes.has(
+          slot.time
+        )
+      ) {
+        continue;
+      }
+
+
+      const vehicle =
+        usableVehicles[
+          slot.vehicle %
+          usableVehicles.length
+        ];
+
+
+      const driverId =
+        usableDrivers.length
+          ? usableDrivers[
+              slot.driver %
+              usableDrivers.length
+            ]
+          : null;
+
+
+      const tripId =
+        'TR' +
+        String(
+          nextNo++
+        ).padStart(
+          4,
+          '0'
+        );
+
+
+      /*
+       * seatCount = ความจุรถทั้งหมด
+       *
+       * เช่น 12 หรือ 40
+       *
+       * จำนวนที่นั่งคงเหลือ
+       * จะไปคำนวณจาก Booking
+       */
+
+      const seatCount =
+        Number(
+          vehicle.SEATS || 0
+        );
+
+
+      await c.execute(
+        `
+        INSERT INTO trips (
+          trip_id,
+          trip_date,
+          depart_time,
+          status,
+          seat_count,
+          vehicle_id,
+          route_id,
+          driver_id
+        )
+        VALUES (
+          :tripId,
+
+          TO_DATE(
+            :datex,
+            'YYYY-MM-DD'
+          ),
+
+          TO_TIMESTAMP(
+            '2000-01-01 ' || :dep,
+            'YYYY-MM-DD HH24:MI'
+          ),
+
+          'OPEN',
+          :seatCount,
+          :vehicleId,
+          :routeId,
+          :driverId
+        )
+        `,
+        {
+          tripId,
+          datex: dateText,
+          dep: slot.time,
+          seatCount,
+          vehicleId: vehicle.ID,
+          routeId,
+          driverId
+        },
+        {
+          autoCommit: false
+        }
+      );
+
+
+      existingTimes.add(
+        slot.time
+      );
+
+      currentCount++;
+
+
+      console.log(
+        'AUTO TRIP CREATED:',
+        tripId,
+        dateText,
+        slot.time
+      );
+    }
+  }
+
+
+  await c.commit();
+
+  console.log(
+    'AUTO FUTURE TRIPS READY'
+  );
+}
+
+
+// ======================================================
 // HEALTH
 // ======================================================
 
@@ -96,6 +523,13 @@ app.get('/api/bootstrap', async (req, res) => {
   try {
 
     c = await oracledb.getConnection(cfg);
+
+    /*
+     * ทุกครั้งที่เว็บโหลดข้อมูล
+     * ตรวจสอบรอบรถวันนี้ถึง 30 วันข้างหน้า
+     */
+    await ensureFutureTrips(c, 30);
+
 
     const [
       departments,
@@ -957,27 +1391,38 @@ app.post('/api/sync', async (req, res) => {
 
     const tripRows = (d.trips || []).map(x => {
 
-      let seatCount = Number(x.seatCount || 0);
+      let seatCount =
+        Number(
+          x.seatCount || 0
+        );
+
 
       if (seatCount <= 0) {
 
         const vehicle =
           (d.vehicles || []).find(
-            v => v.id === x.vehicleId
+            v =>
+              v.id === x.vehicleId
           );
+
 
         const vehicleType =
           vehicle
             ? (d.vehicleTypes || []).find(
-                vt => vt.id === vehicle.typeId
+                vt =>
+                  vt.id === vehicle.typeId
               )
             : null;
 
+
         seatCount =
           vehicleType
-            ? Number(vehicleType.seats || 0)
+            ? Number(
+                vehicleType.seats || 0
+              )
             : 0;
       }
+
 
       return {
         id: x.id,
@@ -987,7 +1432,8 @@ app.post('/api/sync', async (req, res) => {
         seatCount,
         vehicleId: x.vehicleId,
         routeId: x.routeId,
-        driverId: x.driverId || null
+        driverId:
+          x.driverId || null
       };
     });
 
@@ -1021,18 +1467,26 @@ app.post('/api/sync', async (req, res) => {
       ) s
 
       ON (
-        t.trip_id = s.trip_id
+        t.trip_id =
+        s.trip_id
       )
 
       WHEN MATCHED THEN
         UPDATE SET
-          t.trip_date = s.trip_date,
-          t.depart_time = s.depart_time,
-          t.status = s.status,
-          t.seat_count = s.seat_count,
-          t.vehicle_id = s.vehicle_id,
-          t.route_id = s.route_id,
-          t.driver_id = s.driver_id
+          t.trip_date =
+            s.trip_date,
+          t.depart_time =
+            s.depart_time,
+          t.status =
+            s.status,
+          t.seat_count =
+            s.seat_count,
+          t.vehicle_id =
+            s.vehicle_id,
+          t.route_id =
+            s.route_id,
+          t.driver_id =
+            s.driver_id
 
       WHEN NOT MATCHED THEN
         INSERT (
@@ -1065,17 +1519,19 @@ app.post('/api/sync', async (req, res) => {
     // ==================================================
 
     const bookingRows =
-      (d.bookings || []).map(x => ({
-        id: x.id,
+      (d.bookings || []).map(
+        x => ({
+          id: x.id,
 
-        createdAt:
-          x.createdAt ||
-          x.created ||
-          null,
+          createdAt:
+            x.createdAt ||
+            x.created ||
+            null,
 
-        userId:
-          x.userId
-      }));
+          userId:
+            x.userId
+        })
+      );
 
 
     await many(
@@ -1098,13 +1554,16 @@ app.post('/api/sync', async (req, res) => {
       ) s
 
       ON (
-        t.booking_id = s.booking_id
+        t.booking_id =
+        s.booking_id
       )
 
       WHEN MATCHED THEN
         UPDATE SET
-          t.booked_at = s.booked_at,
-          t.user_id = s.user_id
+          t.booked_at =
+            s.booked_at,
+          t.user_id =
+            s.user_id
 
       WHEN NOT MATCHED THEN
         INSERT (
@@ -1127,25 +1586,37 @@ app.post('/api/sync', async (req, res) => {
     // ==================================================
 
     const bookingItemRows =
-      (d.bookingItems || []).map(x => ({
-        id: x.id,
-        qr: x.qr,
-        status: x.status,
-        seats: Number(x.seats || 1),
-        checkin: x.checkin || null,
-        bookingId: x.bookingId,
-        tripId: x.tripId,
+      (d.bookingItems || []).map(
+        x => ({
+          id: x.id,
+          qr: x.qr,
+          status: x.status,
 
-        boardStopId:
-          x.boardStopId ||
-          x.board ||
-          null,
+          seats:
+            Number(
+              x.seats || 1
+            ),
 
-        alightStopId:
-          x.alightStopId ||
-          x.alight ||
-          null
-      }));
+          checkin:
+            x.checkin || null,
+
+          bookingId:
+            x.bookingId,
+
+          tripId:
+            x.tripId,
+
+          boardStopId:
+            x.boardStopId ||
+            x.board ||
+            null,
+
+          alightStopId:
+            x.alightStopId ||
+            x.alight ||
+            null
+        })
+      );
 
 
     await many(
@@ -1175,19 +1646,27 @@ app.post('/api/sync', async (req, res) => {
 
       ON (
         t.booking_item_id =
-          s.booking_item_id
+        s.booking_item_id
       )
 
       WHEN MATCHED THEN
         UPDATE SET
-          t.qr_code = s.qr_code,
-          t.status = s.status,
-          t.seats = s.seats,
-          t.checkin_at = s.checkin_at,
-          t.booking_id = s.booking_id,
-          t.trip_id = s.trip_id,
-          t.board_stop_id = s.board_stop_id,
-          t.alight_stop_id = s.alight_stop_id
+          t.qr_code =
+            s.qr_code,
+          t.status =
+            s.status,
+          t.seats =
+            s.seats,
+          t.checkin_at =
+            s.checkin_at,
+          t.booking_id =
+            s.booking_id,
+          t.trip_id =
+            s.trip_id,
+          t.board_stop_id =
+            s.board_stop_id,
+          t.alight_stop_id =
+            s.alight_stop_id
 
       WHEN NOT MATCHED THEN
         INSERT (
@@ -1219,6 +1698,7 @@ app.post('/api/sync', async (req, res) => {
 
     await c.commit();
 
+
     console.log('');
     console.log('====================================');
     console.log(' SAFE SYNC SUCCESS');
@@ -1226,10 +1706,12 @@ app.post('/api/sync', async (req, res) => {
     console.log('====================================');
     console.log('');
 
+
     res.json({
       ok: true,
       mode: 'safe-upsert'
     });
+
 
   } catch (e) {
 
@@ -1240,11 +1722,15 @@ app.post('/api/sync', async (req, res) => {
     console.error(e);
     console.error('');
 
+
     if (c) {
       try {
         await c.rollback();
-        console.log('ROLLBACK SUCCESS');
+        console.log(
+          'ROLLBACK SUCCESS'
+        );
       } catch (rollbackError) {
+
         console.error(
           'ROLLBACK ERROR:',
           rollbackError
@@ -1252,15 +1738,19 @@ app.post('/api/sync', async (req, res) => {
       }
     }
 
+
     res.status(500).json({
       ok: false,
       error: e.message,
       code: e.code || null
     });
 
+
   } finally {
 
-    if (c) await c.close();
+    if (c) {
+      await c.close();
+    }
   }
 });
 
@@ -1272,280 +1762,298 @@ app.post('/api/sync', async (req, res) => {
 // ไม่มี DELETE FROM table ทั้งตาราง
 // ======================================================
 
-app.delete('/api/delete/:entity/:id', async (req, res) => {
+app.delete(
+  '/api/delete/:entity/:id',
+  async (req, res) => {
 
-  const entity =
-    String(req.params.entity || '');
-
-  const id =
-    String(req.params.id || '').trim();
-
-
-  if (!id) {
-
-    return res.status(400).json({
-      ok: false,
-      error: 'missing id'
-    });
-  }
-
-
-  // ====================================================
-  // WHITELIST
-  // ====================================================
-
-  const allowed = {
-
-    departments: {
-      sql:
-        `DELETE FROM departments
-         WHERE department_id = :id`
-    },
-
-
-    positions: {
-
-      before: [
-        `DELETE FROM permissions
-         WHERE position_id = :id`
-      ],
-
-      sql:
-        `DELETE FROM positions
-         WHERE position_id = :id`
-    },
-
-
-    screens: {
-
-      before: [
-        `DELETE FROM permissions
-         WHERE screen_id = :id`
-      ],
-
-      sql:
-        `DELETE FROM screens
-         WHERE screen_id = :id`
-    },
-
-
-    vehicleTypes: {
-
-      sql:
-        `DELETE FROM vehicle_types
-         WHERE vehicle_type_id = :id`
-    },
-
-
-    vehicles: {
-
-      sql:
-        `DELETE FROM vehicles
-         WHERE vehicle_id = :id`
-    },
-
-
-    stops: {
-
-      sql:
-        `DELETE FROM stops
-         WHERE stop_id = :id`
-    },
-
-
-    routes: {
-
-      before: [
-        `DELETE FROM route_stops
-         WHERE route_id = :id`
-      ],
-
-      sql:
-        `DELETE FROM routes
-         WHERE route_id = :id`
-    },
-
-
-    trips: {
-
-      sql:
-        `DELETE FROM trips
-         WHERE trip_id = :id`
-    },
-
-
-    users: {
-
-      before: [
-        `DELETE FROM employees
-         WHERE user_id = :id`
-      ],
-
-      sql:
-        `DELETE FROM users
-         WHERE user_id = :id`
-    }
-  };
-
-
-  const deleteConfig =
-    allowed[entity];
-
-
-  if (!deleteConfig) {
-
-    return res.status(400).json({
-      ok: false,
-      error:
-        'ไม่อนุญาตให้ลบ entity นี้: ' +
-        entity
-    });
-  }
-
-
-  let c;
-
-
-  try {
-
-    c =
-      await oracledb.getConnection(cfg);
-
-
-    // ==================================================
-    // DELETE CHILD RECORDS
-    // ==================================================
-
-    for (
-      const sql
-      of (deleteConfig.before || [])
-    ) {
-
-      await c.execute(
-        sql,
-        { id },
-        {
-          autoCommit: false
-        }
-      );
-    }
-
-
-    // ==================================================
-    // DELETE MAIN RECORD
-    // ==================================================
-
-    const result =
-      await c.execute(
-        deleteConfig.sql,
-        { id },
-        {
-          autoCommit: false
-        }
+    const entity =
+      String(
+        req.params.entity || ''
       );
 
 
-    // ==================================================
-    // NOT FOUND
-    // ==================================================
+    const id =
+      String(
+        req.params.id || ''
+      ).trim();
 
-    if (!result.rowsAffected) {
 
-      await c.rollback();
+    if (!id) {
 
-      return res.status(404).json({
+      return res.status(400).json({
         ok: false,
-        error:
-          'ไม่พบข้อมูล ' + id
+        error: 'missing id'
       });
     }
 
 
-    // ==================================================
-    // COMMIT
-    // ==================================================
+    const allowed = {
 
-    await c.commit();
+      departments: {
 
-
-    console.log('');
-    console.log(
-      'SAFE DELETE SUCCESS:',
-      entity,
-      id
-    );
-    console.log('');
+        sql:
+          `
+          DELETE FROM departments
+          WHERE department_id = :id
+          `
+      },
 
 
-    res.json({
-      ok: true,
-      entity,
-      id
-    });
+      positions: {
+
+        before: [
+          `
+          DELETE FROM permissions
+          WHERE position_id = :id
+          `
+        ],
+
+        sql:
+          `
+          DELETE FROM positions
+          WHERE position_id = :id
+          `
+      },
 
 
-  } catch (e) {
+      screens: {
+
+        before: [
+          `
+          DELETE FROM permissions
+          WHERE screen_id = :id
+          `
+        ],
+
+        sql:
+          `
+          DELETE FROM screens
+          WHERE screen_id = :id
+          `
+      },
 
 
-    // ==================================================
-    // ROLLBACK
-    // ==================================================
+      vehicleTypes: {
 
-    if (c) {
+        sql:
+          `
+          DELETE FROM vehicle_types
+          WHERE vehicle_type_id = :id
+          `
+      },
 
-      try {
+
+      vehicles: {
+
+        sql:
+          `
+          DELETE FROM vehicles
+          WHERE vehicle_id = :id
+          `
+      },
+
+
+      stops: {
+
+        sql:
+          `
+          DELETE FROM stops
+          WHERE stop_id = :id
+          `
+      },
+
+
+      routes: {
+
+        before: [
+          `
+          DELETE FROM route_stops
+          WHERE route_id = :id
+          `
+        ],
+
+        sql:
+          `
+          DELETE FROM routes
+          WHERE route_id = :id
+          `
+      },
+
+
+      trips: {
+
+        sql:
+          `
+          DELETE FROM trips
+          WHERE trip_id = :id
+          `
+      },
+
+
+      users: {
+
+        before: [
+          `
+          DELETE FROM employees
+          WHERE user_id = :id
+          `
+        ],
+
+        sql:
+          `
+          DELETE FROM users
+          WHERE user_id = :id
+          `
+      }
+    };
+
+
+    const deleteConfig =
+      allowed[entity];
+
+
+    if (!deleteConfig) {
+
+      return res
+        .status(400)
+        .json({
+          ok: false,
+          error:
+            'ไม่อนุญาตให้ลบ entity นี้: ' +
+            entity
+        });
+    }
+
+
+    let c;
+
+
+    try {
+
+      c =
+        await oracledb
+          .getConnection(cfg);
+
+
+      for (
+        const sql
+        of (
+          deleteConfig.before ||
+          []
+        )
+      ) {
+
+        await c.execute(
+          sql,
+          { id },
+          {
+            autoCommit: false
+          }
+        );
+      }
+
+
+      const result =
+        await c.execute(
+          deleteConfig.sql,
+          { id },
+          {
+            autoCommit: false
+          }
+        );
+
+
+      if (!result.rowsAffected) {
+
         await c.rollback();
-      } catch (_) {}
-    }
+
+        return res
+          .status(404)
+          .json({
+            ok: false,
+            error:
+              'ไม่พบข้อมูล ' +
+              id
+          });
+      }
 
 
-    console.error('');
-    console.error(
-      'SAFE DELETE ERROR:',
-      entity,
-      id
-    );
-    console.error(e);
-    console.error('');
+      await c.commit();
 
 
-    let message =
-      e.message ||
-      'ไม่สามารถลบข้อมูลได้';
+      console.log('');
+      console.log(
+        'SAFE DELETE SUCCESS:',
+        entity,
+        id
+      );
+      console.log('');
 
 
-    // ==================================================
-    // FOREIGN KEY
-    // ==================================================
-
-    if (
-      e.errorNum === 2292 ||
-      String(e.message || '')
-        .includes('ORA-02292')
-    ) {
-
-      message =
-        'ไม่สามารถลบได้ เพราะข้อมูลนี้ถูกใช้งานโดยข้อมูลอื่นอยู่';
-    }
+      res.json({
+        ok: true,
+        entity,
+        id
+      });
 
 
-    res.status(409).json({
-      ok: false,
-      error: message,
-      code: e.code || null
-    });
+    } catch (e) {
+
+      if (c) {
+
+        try {
+          await c.rollback();
+        } catch (_) {}
+      }
 
 
-  } finally {
+      console.error('');
+      console.error(
+        'SAFE DELETE ERROR:',
+        entity,
+        id
+      );
+      console.error(e);
+      console.error('');
 
-    if (c) {
 
-      try {
-        await c.close();
-      } catch (_) {}
+      let message =
+        e.message ||
+        'ไม่สามารถลบข้อมูลได้';
+
+
+      if (
+        e.errorNum === 2292 ||
+        String(
+          e.message || ''
+        ).includes(
+          'ORA-02292'
+        )
+      ) {
+
+        message =
+          'ไม่สามารถลบได้ เพราะข้อมูลนี้ถูกใช้งานโดยข้อมูลอื่นอยู่';
+      }
+
+
+      res.status(409).json({
+        ok: false,
+        error: message,
+        code: e.code || null
+      });
+
+
+    } finally {
+
+      if (c) {
+
+        try {
+          await c.close();
+        } catch (_) {}
+      }
     }
   }
-});
+);
 
 
 // ======================================================
@@ -1569,7 +2077,9 @@ app.use((req, res) => {
 // ======================================================
 
 const port =
-  Number(process.env.PORT) || 3000;
+  Number(
+    process.env.PORT
+  ) || 3000;
 
 
 app.listen(
@@ -1580,6 +2090,7 @@ app.listen(
     console.log('====================================');
     console.log(' MUT Shuttle Server');
     console.log(' SAFE SYNC + SAFE DELETE');
+    console.log(' AUTO TRIPS 2/3 ROUNDS');
     console.log('====================================');
 
     console.log(
